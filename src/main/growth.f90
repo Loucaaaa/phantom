@@ -54,6 +54,12 @@ module growth
  real, public           :: rsnow        = 100.
  real, public           :: Tsnow        = 150.
  real, public           :: vfragSI      = 15.
+ !
+ real, public           :: a_frag       = 0.
+ real, public           :: b_frag       = 0.
+ real, public           :: c_frag       = 0.
+ real, public           :: d_frag       = 0.
+ ! 
  real, public           :: vfraginSI    = 5.
  real, public           :: vfragoutSI   = 15.
  real, public           :: cohacccgs    = 100
@@ -136,7 +142,7 @@ subroutine init_growth(ierr)
     end select
  endif
 
- if (isnow > 0) then
+ if (isnow > 0 .and. isnow < 3) then !-- isnow < 3 added by Louca
     if (vfragin <= 0) then
        call error('init_growth','vfragin <= 0',var='vfragin',val=vfragin)
        ierr = 3
@@ -194,9 +200,19 @@ subroutine print_growthinfo(iprint)
        write(iprint,"(a)")              ' ===> Using temperature based snow line <=== '
        write(iprint,"(2(a,1pg10.3),a)") ' Tsnow = ',Tsnow,' K = ',Tsnow,' (code units)'
     endif
+    !!!!!!!!!!!!!!
+    ! add by Louca
+    if (isnow == 3) then
+       write(iprint, "(a)")             ' ===> Using vfrag wich depends on temperature <=== '
+       write(iprint, "(a,1pg10.3)")     ' a_frag = ', a_frag
+       write(iprint, "(a,1pg10.3)")     ' b_frag = ', b_frag
+       write(iprint, "(a,1pg10.3)")     ' c_freg = ', c_frag
+       write(iprint, "(a,1pg10.3)")     ' d_frag = ', d_frag
+    endif
+    !!!!!!!!!!!!!!
     if (isnow == 0) then
        write(iprint,"(2(a,1pg10.3),a)") ' vfrag = ',vfragSI,' m/s = ',vfrag ,' (code units)'
-    else
+    else if (isnow > 0 .and. isnow < 3) then !-- if... added by Louca
        write(iprint,"(2(a,1pg10.3),a)") ' vfragin = ',vfraginSI,' m/s = ',vfragin,' (code units)'
        write(iprint,"(2(a,1pg10.3),a)") ' vfragin = ',vfragoutSI,' m/s = ',vfragout,' (code units)'
     endif
@@ -325,12 +341,14 @@ end subroutine get_growth_rate
 !-----------------------------------------------------------------------
 subroutine get_vrelonvfrag(xyzh,vxyzu,vrel,VrelVf,dustgasprop)
  use physcon,         only:Ro,roottwo
+ use eos,             only:ieos,get_temperature
  real, intent(in)    :: xyzh(:)
  real, intent(in)    :: dustgasprop(:)
  real, intent(inout) :: vrel,vxyzu(:)
  real, intent(out)   :: VrelVf
  real                 :: Vt
  integer              :: izone
+ real                 :: r,Tgas 
 
  !--compute turbulent velocity
  Vt   = sqrt(roottwo*Ro*alpha_dg)*dustgasprop(1)
@@ -345,6 +363,19 @@ subroutine get_vrelonvfrag(xyzh,vxyzu,vrel,VrelVf,dustgasprop)
  elseif (ifrag > 0) then
     call comp_snow_line(xyzh,vxyzu,dustgasprop(2),izone)
     select case(izone)
+    !
+    case(3)
+       r = sqrt(xyzh(1)**2 + xyzh(2)**2 + xyzh(3)**2)
+       Tgas = get_temperature(ieos,xyzh,dustgasprop(2),vxyzu)
+       !vfrag = ( a_frag * exp(b_frag * 197 * (r/au*udist)**(-0.75)) + c_frag ) * 100 / unit_velocity   !AeBT + C / Chondrite
+       !vfrag = ( a_frag * exp(b_frag * (Tgas/197)**(-1.33)) + c_frag ) * 100 / unit_velocity           !AeBr + C
+       !vfrag = ( a_frag * exp(b_frag * r/au*udist) + c_frag ) * 100 / unit_velocity                    !AeBr + C
+       vfrag = ( a_frag * Tgas + b_frag ) * 100 / unit_velocity                                        !aT + b
+       !vfrag = ( a_frag * (Tgas/197)**(-1.33) + b_frag ) * 100 / unit_velocity                         !aR + b
+       !vfrag = ( d_frag / (1 + a_frag * exp(b_frag * 197 * (r/au*udist)**(-0.75))) + c_frag ) * 100 / unit_velocity  !Mo    
+       !vfrag = ( a_frag + b_frag + c_frag ) *100 / unit_velocity
+       if (vfrag > 0.) VrelVf = vrel/vfrag
+    !
     case(2)
        if (vfragout > 0.) VrelVf = vrel/vfragout
     case(1)
@@ -381,6 +412,10 @@ subroutine comp_snow_line(xyzh,vxyzu,rhogas,izone)
     Tgas = get_temperature(ieos,xyzh,rhogas,vxyzu)
     if (Tgas >= Tsnow) izone = 1
     if (Tgas < Tsnow) izone = 2
+ !
+ case(3)
+    izone = 3
+ !
  case default
     izone = 0
  end select
@@ -408,11 +443,19 @@ subroutine write_options_growth(iunit)
     else
        call write_inopt(gsizemincgs,'grainsizemin','minimum grain size in cm',iunit)
     endif
-    call write_inopt(isnow,'isnow','snow line (0=off,1=position based,2=temperature based)',iunit)
+    call write_inopt(isnow,'isnow','snow line (0=off,1=position based,2=temperature based,3=vfrag depends on temperature)',iunit)
     if (isnow == 1) call write_inopt(rsnow,'rsnow','position of the snow line in AU',iunit)
     if (isnow == 2) call write_inopt(Tsnow,'Tsnow','snow line condensation temperature in K',iunit)
     if (isnow == 0) call write_inopt(vfragSI,'vfrag','uniform fragmentation threshold in m/s',iunit)
-    if (isnow > 0) then
+    !
+    if (isnow == 3) then
+       call write_inopt(a_frag,'a_frag','vfrag(T) = what you want',iunit)
+       call write_inopt(b_frag,'b_frag','same as a_frag',iunit)
+       call write_inopt(c_frag,'c_frag','same as a_frag',iunit)
+       call write_inopt(d_frag,'d_frag','same as a_frag',iunit)
+    endif
+    !
+    if (isnow > 0 .and. isnow < 3) then !-- isnow < 3 added by Louca
        call write_inopt(vfraginSI,'vfragin','inward fragmentation threshold in m/s',iunit)
        call write_inopt(vfragoutSI,'vfragout','outward fragmentation threshold in m/s',iunit)
     endif
@@ -449,7 +492,7 @@ subroutine read_options_growth(db,nerr)
  call read_inopt(iporosity,'iporosity',db,min=-1,max=1,errcount=nerr,default=0)
  use_porosity = (iporosity /= 0)  !--convert to logical flag
  if (ifrag > 0) then
-    call read_inopt(isnow,'isnow',db,min=0,max=2,errcount=nerr)
+    call read_inopt(isnow,'isnow',db,min=0,max=3,errcount=nerr)
     if (use_porosity) then
        call read_inopt(tsmincgs,'tsmincgs',db,min=0.,errcount=nerr)
     else
@@ -461,8 +504,15 @@ subroutine read_options_growth(db,nerr)
        call read_inopt(rsnow,'rsnow',db,min=0.,errcount=nerr)
     elseif (isnow == 2) then
        call read_inopt(Tsnow,'Tsnow',db,min=0.,errcount=nerr)
+    !
+    elseif (isnow == 3) then
+       call read_inopt(a_frag, 'a_frag',db,errcount=nerr)
+       call read_inopt(b_frag, 'b_frag',db,errcount=nerr)
+       call read_inopt(c_frag, 'c_frag',db,errcount=nerr)
+       call read_inopt(d_frag, 'd_frag',db,errcount=nerr)
+    !
     endif
-    if (isnow > 0) then
+    if (isnow > 0 .and. isnow < 3) then !-- isnow < 3 added by Louca
        call read_inopt(vfraginSI,'vfragin',db,min=0.,errcount=nerr)
        call read_inopt(vfragoutSI,'vfragout',db,min=0.,errcount=nerr)
     endif
@@ -495,12 +545,18 @@ subroutine write_growth_setup_options(iunit)
  call write_inopt(ifrag,'ifrag','fragmentation of dust (0=off,1=on,2=Kobayashi)',iunit)
  call write_inopt(ieros,'ieros','erosion of dust (0=off,1=on)',iunit)
  call write_inopt(iporosity,'iporosity','porosity (0=off,1=on)',iunit)
- call write_inopt(isnow,'isnow','snow line (0=off,1=position based,2=temperature based)',iunit)
+ call write_inopt(isnow,'isnow','snow line (0=off,1=position based,2=temperature based,3=vfrag depends on temperature)',iunit)
  call write_inopt(rsnow,'rsnow','snow line position in AU',iunit)
  call write_inopt(Tsnow,'Tsnow','snow line condensation temperature in K',iunit)
  call write_inopt(vfragSI,'vfrag','uniform fragmentation threshold in m/s',iunit)
  call write_inopt(vfraginSI,'vfragin','inward fragmentation threshold in m/s',iunit)
  call write_inopt(vfragoutSI,'vfragout','outward fragmentation threshold in m/s',iunit)
+ !
+ call write_inopt(a_frag,'a_frag','vfrag = what you want',iunit)
+ call write_inopt(b_frag,'b_frag','same as a_frag',iunit)
+ call write_inopt(c_frag,'c_frag','same as a_frag',iunit)
+ call write_inopt(d_frag,'d_frag','same as a_frag',iunit)
+ !
  if (use_porosity) then
     call write_inopt(tsmincgs,'tsmincgs','minimum allowed stopping time',iunit)
  else
@@ -525,7 +581,7 @@ subroutine read_growth_setup_options(db,nerr)
  call read_inopt(iporosity,'iporosity',db,min=-1,max=1,errcount=nerr)
  use_porosity = (iporosity /= 0)
  if (ifrag > 0) then
-    call read_inopt(isnow,'isnow',db,min=0,max=2,errcount=nerr)
+    call read_inopt(isnow,'isnow',db,min=0,max=3,errcount=nerr)
     if (use_porosity) then
        call read_inopt(tsmincgs,'tsmincgs',db,min=1.e-5,errcount=nerr)
     else
@@ -542,6 +598,13 @@ subroutine read_growth_setup_options(db,nerr)
        call read_inopt(Tsnow,'Tsnow',db,min=0.,errcount=nerr)
        call read_inopt(vfraginSI,'vfragin',db,min=0.,errcount=nerr)
        call read_inopt(vfragoutSI,'vfragout',db,min=0.,errcount=nerr)
+    !
+    case(3)
+       call read_inopt(a_frag,'a_frag',db,errcount=nerr)
+       call read_inopt(b_frag,'b_frag',db,errcount=nerr)
+       call read_inopt(c_frag,'c_frag',db,errcount=nerr)
+       call read_inopt(d_frag,'d_frag',db,errcount=nerr)
+    !
     end select
  endif
 

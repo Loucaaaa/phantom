@@ -56,7 +56,7 @@ subroutine test_growth(ntests,npass)
 
  nfailed = 0
  do ifrag=0,2
-    do isnow=0,2
+    do isnow=0,3
        call init_growth(ierr)
        call checkval(ierr,0,0,nfailed(ifrag+isnow+1),'growth initialisation')
     enddo

@@ -91,7 +91,7 @@ module setup
                             update_externalforce
  use extern_binary,    only:mass2,accradius1,accradius2,ramp,surface_force,eps_soft1
  use fileutils,        only:make_tags_unique
- use growth,           only:ifrag,isnow,rsnow,Tsnow,vfragSI,vfraginSI,vfragoutSI,gsizemincgs,iporosity
+ use growth,           only:ifrag,isnow,rsnow,Tsnow,vfragSI,vfraginSI,vfragoutSI,gsizemincgs,iporosity,a_frag,b_frag,c_frag,d_frag
  use io,               only:master,warning,error,fatal
  use kernel,           only:hfact_default
  use options,          only:use_dustfrac,iexternalforce,use_hybrid,use_porosity
@@ -2631,9 +2631,14 @@ subroutine setup_interactive(id)
        call prompt('Enter fragmentation model (0=off,1=on,2=Kobayashi)',ifrag,-1,2)
        if (ifrag > 0) then
           call prompt('Enter minimum allowed grain size in cm',gsizemincgs)
-          call prompt('Do you want a snow line ? (0=no,1=position based,2=temperature based)',isnow,0,2)
+          call prompt('Do you want a snow line ? (0=no,1=position based,2=temperature based,3=vfrag(T))',isnow,0,3)
           if (isnow == 0) then
              call prompt('Enter uniform vfrag in m/s',vfragSI,1.)
+          elseif (isnow == 3) then
+             call prompt('Enter a_frag',a_frag)
+             call prompt('Enter b_frag',b_frag)
+             call prompt('Enter c_frag',c_frag)
+             call prompt('Enter d_frag',d_frag)
           else
              if (isnow == 1) call prompt('How far from the star in AU ?',rsnow,0.)
              if (isnow == 2) call prompt('Enter snow line condensation temperature in K',Tsnow,0.)
